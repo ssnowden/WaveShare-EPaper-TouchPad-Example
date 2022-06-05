@@ -34,25 +34,18 @@ def show_photo_small(image, start_index):
         but may prove quick
         start_index: the images_small index to start the display from
     """
-    image_positions = [
-        (2, 126),
-        (2, 2),
-        (47, 126),
-        (47, 2),
-    ]
+    image_positions = photo_list_view[5:]
     display_images = SMALL_IMAGES[start_index + 1 :]
 
     for image_position, display_image in zip_longest(image_positions, display_images):
         if image_position:
-            image_left = image_position[0]
-            image_top = image_position[1]
-            newimage = (
-                Image.open(os.path.join(PICTURE_DIRECTORY, display_image))
-                if display_image
-                else Image.open(os.path.join(PICTURE_DIRECTORY, SMALL_IMAGES[0]))
-            )
+            try:
+                newimage = Image.open(os.path.join(PICTURE_DIRECTORY, display_image))
+            except IOError as exception:
+                logging.info(exception)
+                newimage = Image.open(os.path.join(PICTURE_DIRECTORY, SMALL_IMAGES[0]))
 
-            image.paste(newimage, (image_left, image_top))
+            image.paste(newimage, (image_position[0], image_position[1]))
 
 
 def show_photo_large(image, index):
@@ -63,10 +56,13 @@ def show_photo_large(image, index):
         but may prove quick
         index: the images_large index of the image to be displayed from the list of images
     """
-    if index > 6:
-        newimage = Image.open(os.path.join(PICTURE_DIRECTORY, LARGE_IMAGES[0]))
-    else:
+    try:
         newimage = Image.open(os.path.join(PICTURE_DIRECTORY, LARGE_IMAGES[index]))
+    except IOError as exception:
+        logging.info(exception)
+        newimage = Image.open(os.path.join(PICTURE_DIRECTORY, LARGE_IMAGES[0]))
+    except KeyError:
+        newimage = Image.open(os.path.join(PICTURE_DIRECTORY, LARGE_IMAGES[0]))
 
     image.paste(newimage, (2, 2))
 
@@ -129,6 +125,33 @@ def whiteboard_draw(touch_current, draw_context):
     )
 
 
+def display_refresh(page, user_refresh):
+    if e_paper.refresh:
+        perform_partial_refresh(page, user_refresh)
+        logging.info("*** Draw Refresh ***\r\n")
+    elif e_paper.touch_count_since_refresh > MAX_TOUCH_COUNT_SINCE_REFRESH:
+        perform_partial_refresh(page, user_refresh)
+        logging.info("*** Max Touch Refresh ***\r\n")
+    elif (
+        e_paper.loop_count_since_refresh > MAX_LOOPS_SINCE_REFRESH
+        and e_paper.touch_count_since_refresh
+        and page == WHITE_BOARD_MENU
+    ):
+        perform_partial_refresh(page, user_refresh)
+        logging.info("*** Whiteboard Max Loops Refresh ***\r\n")
+    elif e_paper.full_update_refresh_count > MAX_REFRESH_BEFORE_FULL_UPDATE:
+        perform_full_refresh()
+        logging.info("--- Auto Full Refresh ---\r\n")
+    elif user_refresh:
+        perform_full_refresh()
+        user_refresh = False
+        logging.info("--- User Full Refresh ---\r\n")
+    else:
+        e_paper.loop_count_since_refresh += 1
+
+    return user_refresh
+
+
 # Menu Options --------------------------------------------------------
 def main_menu_event(current_view):
     """This function manages the main menu
@@ -161,6 +184,8 @@ def whiteboard_menu_event(current_view):
     attributes:
         current_view: The current view that defines the touch hotspots
     """
+    user_refresh = False
+
     if (
         current_view[0].bottom > touch_current.X[0] > current_view[0].top
         and current_view[0].left > touch_current.Y[0] > current_view[0].right
@@ -175,7 +200,7 @@ def whiteboard_menu_event(current_view):
         logging.info(f"{current_view[1].name} ...\r\n")
         display_menu(MENUS[MAIN_MENU], 0, 0)
         e_paper.refresh = True
-        return MAIN_MENU
+        return MAIN_MENU, user_refresh
     elif (
         current_view[2].bottom > touch_current.X[0] > current_view[2].top
         and current_view[2].left > touch_current.Y[0] > current_view[2].right
@@ -184,7 +209,7 @@ def whiteboard_menu_event(current_view):
         user_refresh = True
         e_paper.refresh = True
 
-    return WHITE_BOARD_MENU
+    return WHITE_BOARD_MENU, user_refresh
 
 
 def photo_list_menu_event(current_view):
@@ -196,21 +221,22 @@ def photo_list_menu_event(current_view):
     global large_photo_to_display
     global small_photo_to_display
 
+    user_refresh = False
     display_photo_list = False
 
     if (
         current_view[2].bottom > touch_current.X[0] > current_view[2].top
         and current_view[2].left > touch_current.Y[0] > current_view[2].right
     ):
-        logging.info(f"{current_view[2].name} ...\r\n")
+        logging.info(f"{current_view[2].name=} ...\r\n")
         display_menu(MENUS[MAIN_MENU], 0, 0)
         e_paper.refresh = True
-        return MAIN_MENU
+        return MAIN_MENU, user_refresh
     elif (
         current_view[1].bottom > touch_current.X[0] > current_view[1].top
         and current_view[1].left > touch_current.Y[0] > current_view[1].right
     ):
-        logging.info(f"{current_view[1].name} ...\r\n")
+        logging.info(f"{current_view[1].name=} ...\r\n")
         small_photo_to_display += 1
         if small_photo_to_display > 2:
             small_photo_to_display = 0
@@ -219,7 +245,7 @@ def photo_list_menu_event(current_view):
         current_view[3].bottom > touch_current.X[0] > current_view[3].top
         and current_view[3].left > touch_current.Y[0] > current_view[3].right
     ):
-        logging.info(f"{current_view[3].name} ...\r\n")
+        logging.info(f"{current_view[3].name=} ...\r\n")
         if small_photo_to_display == 0:
             logging.info("Top page ...\r\n")
         else:
@@ -229,14 +255,15 @@ def photo_list_menu_event(current_view):
         current_view[4].bottom > touch_current.X[0] > current_view[4].top
         and current_view[4].left > touch_current.Y[0] > current_view[4].right
     ):
-        logging.info(f"{current_view[4].name} ...\r\n")
+        logging.info(f"{current_view[4].name=} ...\r\n")
         user_refresh = True
+        logging.info(f"{user_refresh=} ...\r\n")
         e_paper.refresh = True
     elif (
         current_view[0].bottom > touch_current.X[0] > current_view[0].top
         and current_view[0].left > touch_current.Y[0] > current_view[0].right
     ):
-        logging.info(f"{current_view[0].name} ...\r\n")
+        logging.info(f"{current_view[0].name=} ...\r\n")
         display_menu(MENUS[PHOTO_MENU], 0, 0)
         large_photo_to_display = int(
             touch_current.X[0] / 46 * 2
@@ -246,7 +273,7 @@ def photo_list_menu_event(current_view):
         )
         show_photo_large(image, large_photo_to_display)
         e_paper.refresh = True
-        return PHOTO_MENU
+        return PHOTO_MENU, user_refresh
 
     if display_photo_list:
         e_paper.refresh = True
@@ -254,7 +281,7 @@ def photo_list_menu_event(current_view):
         show_photo_small(image, small_photo_to_display)  # show small photo
         display_photo_list = False
 
-    return PHOTO_LIST_MENU
+    return PHOTO_LIST_MENU, user_refresh
 
 
 def photo_menu_event(current_view):
@@ -266,22 +293,23 @@ def photo_menu_event(current_view):
     global large_photo_to_display
     global small_photo_to_display
 
+    user_refresh = False
     refresh_photo = False
 
     if (
         current_view[0].bottom > touch_current.X[0] > current_view[0].top
         and current_view[0].left > touch_current.Y[0] > current_view[0].right
     ):
-        logging.info(f"{current_view[0].name} ...\r\n")
+        logging.info(f"{current_view[0].name=} ...\r\n")
         display_menu(MENUS[PHOTO_LIST_MENU], 0, 0)
         show_photo_small(image, small_photo_to_display)
         e_paper.refresh = True
-        return PHOTO_LIST_MENU
+        return PHOTO_LIST_MENU, user_refresh
     elif (
         current_view[1].bottom > touch_current.X[0] > current_view[1].top
         and current_view[1].left > touch_current.Y[0] > current_view[1].right
     ):
-        logging.info(f"{current_view[1].name} ...\r\n")
+        logging.info(f"{current_view[1].name=} ...\r\n")
         large_photo_to_display += 1
         if large_photo_to_display > 6:
             large_photo_to_display = 1
@@ -290,15 +318,15 @@ def photo_menu_event(current_view):
         current_view[2].bottom > touch_current.X[0] > current_view[2].top
         and current_view[2].left > touch_current.Y[0] > current_view[2].right
     ):
-        logging.info(f"{current_view[2].name} ...\r\n")
+        logging.info(f"{current_view[2].name=} ...\r\n")
         display_menu(MENUS[MAIN_MENU], 0, 0)
         e_paper.refresh = True
-        return MAIN_MENU
+        return MAIN_MENU, user_refresh
     elif (
         current_view[3].bottom > touch_current.X[0] > current_view[3].top
         and current_view[3].left > touch_current.Y[0] > current_view[3].right
     ):
-        logging.info(f"{current_view[3].name} ...\r\n")
+        logging.info(f"{current_view[3].name=} ...\r\n")
         if large_photo_to_display == 1:
             logging.info("Top photo ...\r\n")
         else:
@@ -308,8 +336,9 @@ def photo_menu_event(current_view):
         current_view[4].bottom > touch_current.X[0] > current_view[4].top
         and current_view[4].left > touch_current.Y[0] > current_view[4].right
     ):
-        logging.info(f"{current_view[4].name} ...\r\n")
+        logging.info(f"{current_view[4].name=} ...\r\n")
         user_refresh = True
+        logging.info(f"{user_refresh=} ...\r\n")
         e_paper.refresh = True
 
     if refresh_photo:
@@ -317,7 +346,24 @@ def photo_menu_event(current_view):
         show_photo_large(image, large_photo_to_display)
         refresh_photo = False
 
-    return PHOTO_MENU
+    return PHOTO_MENU, user_refresh
+
+
+def close_app(app_thread):
+    global thread_running
+
+    logging.info("Clear the display")
+    e_paper.update()
+    e_paper.clear(0xFF)
+    e_paper.sleep()
+
+    logging.info("Exit app thread")
+    thread_running = False
+    time.sleep(2)
+    app_thread.join()
+    e_paper.exit()
+    logging.info("Exit script")
+    exit()
 
 
 Hotspot = namedtuple("Hotspot", "top bottom right left name")
@@ -387,6 +433,10 @@ photo_list_view = [
     Hotspot(96, 120, 113, 136, "Home"),
     Hotspot(96, 120, 169, 190, "Last Page"),
     Hotspot(96, 120, 220, 242, "Refresh"),
+    (2, 126),
+    (2, 2),
+    (47, 126),
+    (47, 2),
 ]
 
 photo_view = [
@@ -404,6 +454,7 @@ views = [
     photo_view,
 ]
 # logging.info(f"{views}")
+logging.info("Initialise global variables")
 thread_running = True
 page = MAIN_MENU
 image = Image.open(os.path.join(PICTURE_DIRECTORY, MENUS[page]))
@@ -412,7 +463,6 @@ small_photo_to_display = 0
 
 
 def main():
-    logging.info("Initialise global variables")
     global thread_running
     global page
     global image
@@ -443,31 +493,7 @@ def main():
     try:
         logging.info("--------------- MAIN LOOP ------------------")
         while True:
-            # Display Refresh
-            if e_paper.refresh:
-                perform_partial_refresh(page, user_refresh)
-                logging.info("*** Draw Refresh ***\r\n")
-            elif e_paper.touch_count_since_refresh > MAX_TOUCH_COUNT_SINCE_REFRESH:
-                perform_partial_refresh(page, user_refresh)
-                logging.info("*** Max Touch Refresh ***\r\n")
-            elif (
-                e_paper.loop_count_since_refresh > MAX_LOOPS_SINCE_REFRESH
-                and e_paper.touch_count_since_refresh > 0
-                and page == WHITE_BOARD_MENU
-            ):
-                perform_partial_refresh(page, user_refresh)
-                logging.info("*** Max Loops Refresh ***\r\n")
-            elif e_paper.full_update_refresh_count > MAX_REFRESH_BEFORE_FULL_UPDATE:
-                perform_full_refresh()
-                logging.info("--- Auto Full Refresh ---\r\n")
-            elif user_refresh:
-                perform_full_refresh()
-                user_refresh = False
-                logging.info("--- User Full Refresh ---\r\n")
-            else:
-                e_paper.loop_count_since_refresh += 1
-
-            # Read the touch input
+            user_refresh = display_refresh(page, user_refresh)
             touch_pad.get_touch_events(touch_current, touch_old)
 
             # Touch Actions:
@@ -485,31 +511,20 @@ def main():
 
                 if page == WHITE_BOARD_MENU and not e_paper.refresh:
                     whiteboard_draw(touch_current, draw_context)
-                    page = whiteboard_menu_event(current_view)
+                    page, user_refresh = whiteboard_menu_event(current_view)
 
                 if page == PHOTO_LIST_MENU and not e_paper.refresh:
-                    page = photo_list_menu_event(current_view)
+                    page, user_refresh = photo_list_menu_event(current_view)
 
                 if page == PHOTO_MENU and not e_paper.refresh:
-                    page = photo_menu_event(current_view)
+                    page, user_refresh = photo_menu_event(current_view)
 
     except IOError as exception:
         logging.info(exception)
 
     except KeyboardInterrupt:
         logging.info("ctrl + c:")
-        logging.info("Clear the display")
-        e_paper.update()
-        e_paper.clear(0xFF)
-        e_paper.sleep()
-
-        logging.info("Exit app thread")
-        thread_running = False
-        time.sleep(2)
-        app_thread.join()
-        e_paper.exit()
-        logging.info("Exit script")
-        exit()
+        close_app(app_thread)
 
 
 if __name__ == "__main__":
